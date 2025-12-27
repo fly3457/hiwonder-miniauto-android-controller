@@ -1,0 +1,24 @@
+name: miniauto_controller
+description: MiniAuto麦克纳姆轮小车蓝牙控制器
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  flutter_blue_plus: ^1.32.0  # BLE蓝牙库,支持DXBT24模块
+  permission_handler: ^11.0.0
+  shared_preferences: ^2.2.2  # 本地存储,用于保存上次连接的设备
+  location: ^5.0.0  # 位置服务检测
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
