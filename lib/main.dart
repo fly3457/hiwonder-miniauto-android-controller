@@ -44,15 +44,15 @@ class _HomePageState extends State<HomePage> {
   double _green = 255.0;
   double _blue = 255.0;
 
-  // RGB高级选项展开状态
-  bool _showAdvancedRgb = false;
-
   // 电压信息
   int _voltage = 0; // 单位: mV
   int _distance = 0; // 单位: mm
 
   // 定时器用于定期请求电压数据
   bool _voltageRequestActive = false;
+
+  // 前进按钮状态（用于距离保护）
+  bool _isForwardPressed = false;
 
   @override
   void initState() {
@@ -66,6 +66,13 @@ class _HomePageState extends State<HomePage> {
         _voltage = voltage;
         _distance = distance;
       });
+
+      // 距离保护：如果正在前进且距离小于100mm (10cm)，自动停止
+      if (_isForwardPressed && distance > 0 && distance < 100) {
+        print('[距离保护] 距离过近(${distance}mm)，自动停止');
+        _bluetoothService.stop();
+        _isForwardPressed = false;
+      }
     };
   }
 
@@ -290,11 +297,11 @@ class _HomePageState extends State<HomePage> {
     _requestVoltageLoop();
   }
 
-  /// 定期请求电压数据的循环
+  /// 定期请求电压和距离数据的循环
   Future<void> _requestVoltageLoop() async {
     while (_voltageRequestActive && _bluetoothService.isConnected) {
       await _bluetoothService.requestVoltageData();
-      await Future.delayed(const Duration(seconds: 2)); // 每2秒请求一次
+      await Future.delayed(const Duration(milliseconds: 200)); // 每200ms请求一次，实现更快的距离刷新
     }
   }
 
@@ -549,6 +556,161 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// 显示RGB高级控制对话框（实时生效）
+  Future<void> _showRgbDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('RGB高级控制'),
+        content: StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 颜色预览
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('当前颜色:', style: TextStyle(fontSize: 16)),
+                    Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: Color.fromRGBO(
+                          _red.round(),
+                          _green.round(),
+                          _blue.round(),
+                          1
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // 红色滑块
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 30,
+                      child: Text('R', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: _red,
+                        min: 0,
+                        max: 255,
+                        divisions: 255,
+                        activeColor: Colors.red,
+                        label: _red.round().toString(),
+                        onChanged: (value) {
+                          setState(() {
+                            _red = value;
+                          });
+                          setDialogState(() {}); // 更新对话框UI
+                          // 实时发送到硬件
+                          _bluetoothService.setRgbColor(
+                            _red.round(),
+                            _green.round(),
+                            _blue.round()
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 40,
+                      child: Text(_red.round().toString(), textAlign: TextAlign.right)
+                    ),
+                  ],
+                ),
+
+                // 绿色滑块
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 30,
+                      child: Text('G', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: _green,
+                        min: 0,
+                        max: 255,
+                        divisions: 255,
+                        activeColor: Colors.green,
+                        label: _green.round().toString(),
+                        onChanged: (value) {
+                          setState(() {
+                            _green = value;
+                          });
+                          setDialogState(() {}); // 更新对话框UI
+                          // 实时发送到硬件
+                          _bluetoothService.setRgbColor(
+                            _red.round(),
+                            _green.round(),
+                            _blue.round()
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 40,
+                      child: Text(_green.round().toString(), textAlign: TextAlign.right)
+                    ),
+                  ],
+                ),
+
+                // 蓝色滑块
+                Row(
+                  children: [
+                    const SizedBox(
+                      width: 30,
+                      child: Text('B', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: _blue,
+                        min: 0,
+                        max: 255,
+                        divisions: 255,
+                        activeColor: Colors.blue,
+                        label: _blue.round().toString(),
+                        onChanged: (value) {
+                          setState(() {
+                            _blue = value;
+                          });
+                          setDialogState(() {}); // 更新对话框UI
+                          // 实时发送到硬件
+                          _bluetoothService.setRgbColor(
+                            _red.round(),
+                            _green.round(),
+                            _blue.round()
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 40,
+                      child: Text(_blue.round().toString(), textAlign: TextAlign.right)
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 构建速度预设按钮
   Widget _buildSpeedPreset(String label, double speed, Function(double) onTap) {
     return ElevatedButton(
@@ -588,18 +750,35 @@ class _HomePageState extends State<HomePage> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          // 连接状态卡片
-          _buildConnectionCard(),
+      body: _bluetoothService.isConnected
+        ? Column(
+            children: [
+              // 上部可滚动区域（连接信息 + 灯光控制）
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      // 连接状态卡片
+                      _buildConnectionCard(),
 
-          // 控制按钮区域
-          if (_bluetoothService.isConnected) ...[
-            const SizedBox(height: 20),
-            Expanded(child: _buildControlPanel()),
-          ],
-        ],
-      ),
+                      // 灯光控制卡片（紧跟在连接信息下方）
+                      _buildRgbControl(),
+                    ],
+                  ),
+                ),
+              ),
+
+              // 底部固定方向控制
+              _buildDirectionControl(),
+              const SizedBox(height: 16), // 底部留白
+            ],
+          )
+        : Column(
+            children: [
+              // 未连接时只显示连接状态卡片
+              _buildConnectionCard(),
+            ],
+          ),
     );
   }
 
@@ -624,14 +803,36 @@ class _HomePageState extends State<HomePage> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    _bluetoothService.isConnected
-                        ? '已连接: ${_connectedDevice?.platformName.isNotEmpty == true ? _connectedDevice!.platformName : _connectedDevice?.remoteId}'
-                        : '未连接',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _bluetoothService.isConnected
+                            ? '已连接: ${_connectedDevice?.platformName.isNotEmpty == true ? _connectedDevice!.platformName : _connectedDevice?.remoteId}'
+                            : '未连接',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      // 测距距离显示 (仅连接时显示)
+                      if (_bluetoothService.isConnected && _distance > 0) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.straighten, size: 14, color: Colors.grey.shade600),
+                            const SizedBox(width: 4),
+                            Text(
+                              '距离: ${(_distance / 10).toStringAsFixed(1)} cm',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 // 电量显示 (仅连接时显示)
@@ -724,244 +925,217 @@ class _HomePageState extends State<HomePage> {
       children: [
         Icon(batteryIcon, color: batteryColor, size: 24),
         const SizedBox(width: 4),
-        Text(
-          '$batteryPercentage%',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: batteryColor,
-          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$batteryPercentage%',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: batteryColor,
+              ),
+            ),
+            Text(
+              '${voltageV.toStringAsFixed(1)}V',
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  /// 构建控制面板
-  Widget _buildControlPanel() {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Column(
-          children: [
-            // 方向控制按钮
-            _buildDirectionControl(),
-            const SizedBox(height: 20),
-
-            // RGB灯光控制
-            _buildRgbControl(),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 构建方向控制
-  Widget _buildDirectionControl() {
-    return Column(
-      children: [
-        // 前进按钮
-        _buildControlButton(
-          icon: Icons.arrow_upward,
-          label: '前进',
-          onPressed: () => _bluetoothService.forward(),
-          color: Colors.green,
-        ),
-        const SizedBox(height: 16),
-
-        // 左转、停止、右转
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            _buildControlButton(
-              icon: Icons.arrow_back,
-              label: '左移',
-              onPressed: () => _bluetoothService.turnLeft(),
-              color: Colors.orange,
-            ),
-            const SizedBox(width: 16),
-            _buildControlButton(
-              icon: Icons.stop,
-              label: '停止',
-              onPressed: () => _bluetoothService.stop(),
-              color: Colors.red,
-              size: 100,
-            ),
-            const SizedBox(width: 16),
-            _buildControlButton(
-              icon: Icons.arrow_forward,
-              label: '右移',
-              onPressed: () => _bluetoothService.turnRight(),
-              color: Colors.orange,
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-
-        // 后退按钮
-        _buildControlButton(
-          icon: Icons.arrow_downward,
-          label: '后退',
-          onPressed: () => _bluetoothService.backward(),
-          color: Colors.blue,
-        ),
-      ],
-    );
-  }
-
-  /// 构建RGB灯光控制
+  /// 构建RGB灯光控制（紧凑版）
   Widget _buildRgbControl() {
     return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 标题和颜色预览
+            // 标题行
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('灯光控制', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Color.fromRGBO(_red.round(), _green.round(), _blue.round(), 1),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey),
-                  ),
+                const Text('灯光控制', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    // "关"按钮（放在原来预览框的位置）
+                    _buildColorPreset('关', 0, 0, 0, displayR: 0, displayG: 0, displayB: 0),
+                    const SizedBox(width: 8),
+                    // 高级设置按钮
+                    IconButton(
+                      icon: const Icon(Icons.tune, size: 20),
+                      onPressed: _showRgbDialog,
+                      tooltip: '高级RGB控制',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
 
-            // 快捷颜色按钮 (放在上方)
+            // 快捷颜色按钮（紧凑排列，不含"关"）
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                _buildColorPreset('红色', 0, 255, 0),
-                _buildColorPreset('绿色', 255, 0, 0),
-                _buildColorPreset('蓝色', 0, 0, 255),
-                _buildColorPreset('黄色', 255, 255, 0),
-                _buildColorPreset('紫色', 0, 255, 255),
-                _buildColorPreset('青色', 255, 0, 255),
-                _buildColorPreset('白色', 255, 255, 255),
-                _buildColorPreset('关闭', 0, 0, 0),
+                _buildColorPreset('红', 10, 0, 0, displayR: 200, displayG: 0, displayB: 0),
+                _buildColorPreset('橘', 50, 10, 0, displayR: 200, displayG: 100, displayB: 0),
+                _buildColorPreset('黄', 30, 10, 0, displayR: 200, displayG: 200, displayB: 0),
+                _buildColorPreset('绿', 0, 10, 0, displayR: 0, displayG: 200, displayB: 0),
+                _buildColorPreset('青', 0, 15, 30, displayR: 0, displayG: 100, displayB: 200),
+                _buildColorPreset('蓝', 0, 0, 10, displayR: 0, displayG: 0, displayB: 200),
+                _buildColorPreset('紫', 10, 0, 10, displayR: 200, displayG: 0, displayB: 200),
+                _buildColorPreset('白', 30, 20, 10, displayR: 255, displayG: 255, displayB: 255),
               ],
             ),
-
-            const SizedBox(height: 12),
-
-            // 高级选项按钮
-            InkWell(
-              onTap: () {
-                setState(() {
-                  _showAdvancedRgb = !_showAdvancedRgb;
-                });
-              },
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    _showAdvancedRgb ? Icons.expand_less : Icons.expand_more,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _showAdvancedRgb ? '收起高级选项' : '展开高级选项',
-                    style: const TextStyle(fontSize: 14, color: Colors.blue),
-                  ),
-                ],
-              ),
-            ),
-
-            // RGB滑块 (默认隐藏,点击后展开)
-            if (_showAdvancedRgb) ...[
-              const SizedBox(height: 16),
-              const Divider(),
-              const SizedBox(height: 8),
-
-              // 红色滑块
-              Row(
-                children: [
-                  const SizedBox(width: 30, child: Text('R', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                  Expanded(
-                    child: Slider(
-                      value: _red,
-                      min: 0,
-                      max: 255,
-                      activeColor: Colors.red,
-                      onChanged: (value) {
-                        setState(() {
-                          _red = value;
-                        });
-                      },
-                      onChangeEnd: (value) {
-                        _bluetoothService.setRgbColor(_red.round(), _green.round(), _blue.round());
-                      },
-                    ),
-                  ),
-                  SizedBox(width: 40, child: Text(_red.round().toString(), textAlign: TextAlign.right)),
-                ],
-              ),
-
-              // 绿色滑块
-              Row(
-                children: [
-                  const SizedBox(width: 30, child: Text('G', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                  Expanded(
-                    child: Slider(
-                      value: _green,
-                      min: 0,
-                      max: 255,
-                      activeColor: Colors.green,
-                      onChanged: (value) {
-                        setState(() {
-                          _green = value;
-                        });
-                      },
-                      onChangeEnd: (value) {
-                        _bluetoothService.setRgbColor(_red.round(), _green.round(), _blue.round());
-                      },
-                    ),
-                  ),
-                  SizedBox(width: 40, child: Text(_green.round().toString(), textAlign: TextAlign.right)),
-                ],
-              ),
-
-              // 蓝色滑块
-              Row(
-                children: [
-                  const SizedBox(width: 30, child: Text('B', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
-                  Expanded(
-                    child: Slider(
-                      value: _blue,
-                      min: 0,
-                      max: 255,
-                      activeColor: Colors.blue,
-                      onChanged: (value) {
-                        setState(() {
-                          _blue = value;
-                        });
-                      },
-                      onChangeEnd: (value) {
-                        _bluetoothService.setRgbColor(_red.round(), _green.round(), _blue.round());
-                      },
-                    ),
-                  ),
-                  SizedBox(width: 40, child: Text(_blue.round().toString(), textAlign: TextAlign.right)),
-                ],
-              ),
-            ],
           ],
         ),
       ),
     );
   }
 
-  /// 构建颜色预设按钮
-  Widget _buildColorPreset(String label, int r, int g, int b) {
+  /// 构建方向控制（固定在底部）
+  Widget _buildDirectionControl() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade300, width: 1),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 前进按钮（宽一些，带距离保护）
+          _buildForwardButton(),
+          const SizedBox(height: 12),
+
+          // 左移、后退、右移 一排
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildControlButton(
+                icon: Icons.arrow_back,
+                label: '左移',
+                onPressed: () => _bluetoothService.turnLeft(),
+                color: Colors.orange,
+                width: 90,
+                height: 70,
+              ),
+              const SizedBox(width: 12),
+              _buildControlButton(
+                icon: Icons.arrow_downward,
+                label: '后退',
+                onPressed: () => _bluetoothService.backward(),
+                color: Colors.blue,
+                width: 90,
+                height: 70,
+              ),
+              const SizedBox(width: 12),
+              _buildControlButton(
+                icon: Icons.arrow_forward,
+                label: '右移',
+                onPressed: () => _bluetoothService.turnRight(),
+                color: Colors.orange,
+                width: 90,
+                height: 70,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建前进按钮（带距离保护）
+  Widget _buildForwardButton() {
+    // 判断是否可以前进（距离大于等于10cm 或 距离未知）
+    bool canMoveForward = _distance == 0 || _distance >= 100;
+
+    return GestureDetector(
+      onTapDown: canMoveForward ? (_) {
+        setState(() {
+          _isForwardPressed = true;
+        });
+        _bluetoothService.forward();
+      } : null,
+      onTapUp: (_) {
+        setState(() {
+          _isForwardPressed = false;
+        });
+        _bluetoothService.stop();
+      },
+      onTapCancel: () {
+        setState(() {
+          _isForwardPressed = false;
+        });
+        _bluetoothService.stop();
+      },
+      child: Container(
+        width: 200,
+        height: 70,
+        decoration: BoxDecoration(
+          color: canMoveForward ? Colors.green : Colors.grey.shade400,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: canMoveForward ? [
+            BoxShadow(
+              color: Colors.green.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ] : [],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.arrow_upward,
+              color: canMoveForward ? Colors.white : Colors.grey.shade600,
+              size: 70 * 0.35,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              canMoveForward ? '前进' : '距离过近',
+              style: TextStyle(
+                color: canMoveForward ? Colors.white : Colors.grey.shade600,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建颜色预设按钮（紧凑版）
+  /// r, g, b: 实际发送给硬件的值
+  /// displayR, displayG, displayB: 用于按钮显示的颜色值
+  Widget _buildColorPreset(
+    String label,
+    int r,
+    int g,
+    int b, {
+    int? displayR,
+    int? displayG,
+    int? displayB,
+  }) {
+    // 如果没有指定显示颜色，使用实际发送值
+    final int btnR = displayR ?? r;
+    final int btnG = displayG ?? g;
+    final int btnB = displayB ?? b;
+
     return ElevatedButton(
       onPressed: () {
         setState(() {
@@ -972,29 +1146,32 @@ class _HomePageState extends State<HomePage> {
         _bluetoothService.setRgbColor(r, g, b);
       },
       style: ElevatedButton.styleFrom(
-        backgroundColor: Color.fromRGBO(r, g, b, 1),
-        foregroundColor: (r + g + b) < 400 ? Colors.white : Colors.black,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        backgroundColor: Color.fromRGBO(btnR, btnG, btnB, 1),
+        foregroundColor: (btnR + btnG + btnB) < 400 ? Colors.white : Colors.black,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: const Size(0, 0),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      child: Text(label, style: const TextStyle(fontSize: 12)),
+      child: Text(label, style: const TextStyle(fontSize: 11)),
     );
   }
 
-  /// 构建控制按钮
+  /// 构建控制按钮（支持自定义宽高）
   Widget _buildControlButton({
     required IconData icon,
     required String label,
     required VoidCallback onPressed,
     required Color color,
-    double size = 80,
+    double width = 80,
+    double height = 80,
   }) {
     return GestureDetector(
       onTapDown: (_) => onPressed(),
       onTapUp: (_) => _bluetoothService.stop(),
       onTapCancel: () => _bluetoothService.stop(),
       child: Container(
-        width: size,
-        height: size,
+        width: width,
+        height: height,
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(12),
@@ -1009,7 +1186,7 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: size * 0.4),
+            Icon(icon, color: Colors.white, size: height * 0.35),
             const SizedBox(height: 4),
             Text(
               label,
