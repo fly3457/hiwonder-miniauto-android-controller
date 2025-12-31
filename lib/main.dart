@@ -44,6 +44,9 @@ class _HomePageState extends State<HomePage> {
   double _green = 255.0;
   double _blue = 255.0;
 
+  // 控制模式: false=简易模式, true=高级模式
+  bool _isAdvancedMode = false;
+
   // 电压信息
   int _voltage = 0; // 单位: mV
   int _distance = 0; // 单位: mm
@@ -728,6 +731,23 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('MiniAuto 小车控制器'),
         actions: [
+          // 控制模式切换开关 (仅连接时显示)
+          if (_connectedDevice != null)
+            IconButton(
+              icon: Icon(_isAdvancedMode ? Icons.gamepad : Icons.control_camera),
+              onPressed: () {
+                setState(() {
+                  _isAdvancedMode = !_isAdvancedMode;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(_isAdvancedMode ? '已切换到高级控制模式' : '已切换到简易控制模式'),
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              },
+              tooltip: _isAdvancedMode ? '切换到简易控制' : '切换到高级控制',
+            ),
           // 速度控制图标 (仅连接时显示)
           if (_connectedDevice != null)
             IconButton(
@@ -1006,6 +1026,12 @@ class _HomePageState extends State<HomePage> {
 
   /// 构建方向控制（固定在底部）
   Widget _buildDirectionControl() {
+    // 根据控制模式显示不同的UI
+    return _isAdvancedMode ? _buildAdvancedControl() : _buildSimpleControl();
+  }
+
+  /// 构建简易控制UI (原有的4方向控制)
+  Widget _buildSimpleControl() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -1054,6 +1080,275 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// 构建高级控制UI (8方向 + 旋转)
+  Widget _buildAdvancedControl() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        border: Border(
+          top: BorderSide(color: Colors.grey.shade300, width: 1),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 8方向控制盘
+          _build8DirectionPad(),
+          const SizedBox(height: 12),
+
+          // 旋转控制按钮
+          _buildRotationButtons(),
+        ],
+      ),
+    );
+  }
+
+  /// 构建8方向控制盘
+  Widget _build8DirectionPad() {
+    const double btnSize = 65.0;
+    const double spacing = 8.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 第一行: 左前、前进、右前
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildDirectionButton(
+              icon: Icons.north_west,
+              label: '左前',
+              onPressed: () => _bluetoothService.moveLeftForward(),
+              color: Colors.purple,
+              size: btnSize,
+            ),
+            const SizedBox(width: spacing),
+            _buildDirectionButton(
+              icon: Icons.north,
+              label: '前进',
+              onPressed: () => _bluetoothService.forward(),
+              color: Colors.green,
+              size: btnSize,
+              isForward: true, // 标记为前进按钮,启用距离保护
+            ),
+            const SizedBox(width: spacing),
+            _buildDirectionButton(
+              icon: Icons.north_east,
+              label: '右前',
+              onPressed: () => _bluetoothService.moveRightForward(),
+              color: Colors.purple,
+              size: btnSize,
+            ),
+          ],
+        ),
+        const SizedBox(height: spacing),
+
+        // 第二行: 左移、停止(空位)、右移
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildDirectionButton(
+              icon: Icons.west,
+              label: '左移',
+              onPressed: () => _bluetoothService.turnLeft(),
+              color: Colors.orange,
+              size: btnSize,
+            ),
+            const SizedBox(width: spacing + btnSize), // 中间留空
+            _buildDirectionButton(
+              icon: Icons.east,
+              label: '右移',
+              onPressed: () => _bluetoothService.turnRight(),
+              color: Colors.orange,
+              size: btnSize,
+            ),
+          ],
+        ),
+        const SizedBox(height: spacing),
+
+        // 第三行: 左后、后退、右后
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildDirectionButton(
+              icon: Icons.south_west,
+              label: '左后',
+              onPressed: () => _bluetoothService.moveLeftBackward(),
+              color: Colors.teal,
+              size: btnSize,
+            ),
+            const SizedBox(width: spacing),
+            _buildDirectionButton(
+              icon: Icons.south,
+              label: '后退',
+              onPressed: () => _bluetoothService.backward(),
+              color: Colors.blue,
+              size: btnSize,
+            ),
+            const SizedBox(width: spacing),
+            _buildDirectionButton(
+              icon: Icons.south_east,
+              label: '右后',
+              onPressed: () => _bluetoothService.moveRightBackward(),
+              color: Colors.teal,
+              size: btnSize,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 构建旋转控制按钮
+  Widget _buildRotationButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildRotateButton(
+          icon: Icons.rotate_left,
+          label: '逆时针',
+          onPressed: () => _bluetoothService.rotateCounterClockwise(),
+          onReleased: () => _bluetoothService.stopRotate(),
+          color: Colors.deepPurple,
+        ),
+        const SizedBox(width: 16),
+        _buildRotateButton(
+          icon: Icons.rotate_right,
+          label: '顺时针',
+          onPressed: () => _bluetoothService.rotateClockwise(),
+          onReleased: () => _bluetoothService.stopRotate(),
+          color: Colors.deepPurple,
+        ),
+      ],
+    );
+  }
+
+  /// 构建方向按钮 (用于8方向控制盘)
+  Widget _buildDirectionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    required Color color,
+    required double size,
+    bool isForward = false, // 是否是前进按钮(需要距离保护)
+  }) {
+    // 如果是前进按钮,检查距离保护
+    bool canMove = true;
+    if (isForward) {
+      canMove = _distance == 0 || _distance >= 100;
+      if (!canMove) {
+        color = Colors.grey.shade400;
+      }
+    }
+
+    return GestureDetector(
+      onTapDown: canMove ? (_) {
+        if (isForward) {
+          setState(() {
+            _isForwardPressed = true;
+          });
+        }
+        onPressed();
+      } : null,
+      onTapUp: (_) {
+        if (isForward) {
+          setState(() {
+            _isForwardPressed = false;
+          });
+        }
+        _bluetoothService.stop();
+      },
+      onTapCancel: () {
+        if (isForward) {
+          setState(() {
+            _isForwardPressed = false;
+          });
+        }
+        _bluetoothService.stop();
+      },
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: canMove ? [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            ),
+          ] : [],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: canMove ? Colors.white : Colors.grey.shade600,
+              size: size * 0.35,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              isForward && !canMove ? '过近' : label,
+              style: TextStyle(
+                color: canMove ? Colors.white : Colors.grey.shade600,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建旋转按钮
+  Widget _buildRotateButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    required VoidCallback onReleased,
+    required Color color,
+  }) {
+    return GestureDetector(
+      onTapDown: (_) => onPressed(),
+      onTapUp: (_) => onReleased(),
+      onTapCancel: () => onReleased(),
+      child: Container(
+        width: 100,
+        height: 60,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 24),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

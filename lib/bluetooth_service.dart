@@ -325,6 +325,45 @@ class BluetoothService {
     // _sendGloveCommand(100, -100); // 手套协议版本
   }
 
+  // ==================== 高级控制: 8方向移动 ====================
+
+  /// 右前移动 (45°)
+  void moveRightForward() {
+    _sendAppCommand(1); // APP协议: state=1 表示右前
+  }
+
+  /// 左前移动 (315°)
+  void moveLeftForward() {
+    _sendAppCommand(3); // APP协议: state=3 表示左前
+  }
+
+  /// 左后移动 (225°)
+  void moveLeftBackward() {
+    _sendAppCommand(5); // APP协议: state=5 表示左后
+  }
+
+  /// 右后移动 (135°)
+  void moveRightBackward() {
+    _sendAppCommand(7); // APP协议: state=7 表示右后
+  }
+
+  // ==================== 高级控制: 旋转 ====================
+
+  /// 顺时针旋转
+  void rotateClockwise() {
+    _sendAppCommand(9); // APP协议: state=9 表示顺时针旋转
+  }
+
+  /// 逆时针旋转
+  void rotateCounterClockwise() {
+    _sendAppCommand(10); // APP协议: state=10 表示逆时针旋转
+  }
+
+  /// 停止旋转
+  void stopRotate() {
+    _sendAppCommand(11); // APP协议: state=11 表示停止旋转
+  }
+
   /// 释放资源
   void dispose() {
     disconnect();
