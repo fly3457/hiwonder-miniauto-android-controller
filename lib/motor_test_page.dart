@@ -28,24 +28,24 @@ class _MotorTestPageState extends State<MotorTestPage> {
   static const int testDuration = 1000; // 每次测试持续时间(ms)
 
   // 测试步骤定义 [电机ID, 位置名称, 方向描述, 速度]
-  // 注意：物理索引定义（与 Arduino 端 app_control_common.ino 一致）
-  // 物理索引0 = 右前轮, 物理索引1 = 左前轮, 物理索引2 = 左后轮, 物理索引3 = 右后轮
+  // 注意：标准Z字形索引定义（与 Arduino 端 app_control_common.ino 一致）
+  // 标准索引0 = 左前轮, 标准索引1 = 右前轮, 标准索引2 = 左后轮, 标准索引3 = 右后轮
   final List<Map<String, dynamic>> _testSteps = [
-    {'motorId': 0, 'position': '右前', 'direction': '正转', 'speed': testSpeed},
-    {'motorId': 0, 'position': '右前', 'direction': '反转', 'speed': -testSpeed},
-    {'motorId': 1, 'position': '左前', 'direction': '正转', 'speed': testSpeed},
-    {'motorId': 1, 'position': '左前', 'direction': '反转', 'speed': -testSpeed},
+    {'motorId': 0, 'position': '左前', 'direction': '正转', 'speed': testSpeed},
+    {'motorId': 0, 'position': '左前', 'direction': '反转', 'speed': -testSpeed},
+    {'motorId': 1, 'position': '右前', 'direction': '正转', 'speed': testSpeed},
+    {'motorId': 1, 'position': '右前', 'direction': '反转', 'speed': -testSpeed},
     {'motorId': 2, 'position': '左后', 'direction': '正转', 'speed': testSpeed},
     {'motorId': 2, 'position': '左后', 'direction': '反转', 'speed': -testSpeed},
     {'motorId': 3, 'position': '右后', 'direction': '正转', 'speed': testSpeed},
     {'motorId': 3, 'position': '右后', 'direction': '反转', 'speed': -testSpeed},
   ];
 
-  // 电机位置映射（物理索引 → 实际轮子位置）
+  // 电机位置映射（标准Z字形索引 → 实际轮子位置）
   // 与 Arduino 端 app_control_common.ino 定义一致
   final Map<int, String> _motorPositions = {
-    0: '右前',
-    1: '左前',
+    0: '左前',
+    1: '右前',
     2: '左后',
     3: '右后',
   };
@@ -179,12 +179,12 @@ class _MotorTestPageState extends State<MotorTestPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
           Text(
-            '电机编号说明（物理索引）:',
+            '电机编号说明（标准Z字形索引）:',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
           ),
           SizedBox(height: 8),
-          Text('电机0: 右前轮', style: TextStyle(fontSize: 12)),
-          Text('电机1: 左前轮', style: TextStyle(fontSize: 12)),
+          Text('电机0: 左前轮', style: TextStyle(fontSize: 12)),
+          Text('电机1: 右前轮', style: TextStyle(fontSize: 12)),
           Text('电机2: 左后轮', style: TextStyle(fontSize: 12)),
           Text('电机3: 右后轮', style: TextStyle(fontSize: 12)),
         ],
@@ -336,17 +336,17 @@ class _MotorTestPageState extends State<MotorTestPage> {
             ),
             child: Stack(
               children: [
-                // 左前轮 (电机1) - 注意物理索引
+                // 左前轮 (电机0) - 标准Z字形索引
                 Positioned(
                   left: 0,
                   top: 0,
-                  child: _buildWheel(1, activeMotorId, '左前'),
+                  child: _buildWheel(0, activeMotorId, '左前'),
                 ),
-                // 右前轮 (电机0) - 注意物理索引
+                // 右前轮 (电机1) - 标准Z字形索引
                 Positioned(
                   right: 0,
                   top: 0,
-                  child: _buildWheel(0, activeMotorId, '右前'),
+                  child: _buildWheel(1, activeMotorId, '右前'),
                 ),
                 // 左后轮 (电机2)
                 Positioned(
