@@ -3,6 +3,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bluetooth_service.dart';
+import 'motor_test_page.dart';
 import 'package:location/location.dart' as loc;
 
 void main() {
@@ -731,6 +732,22 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('MiniAuto 小车控制器'),
         actions: [
+          // 设置图标 (仅连接时显示，用于进入电机检测)
+          if (_connectedDevice != null)
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MotorTestPage(
+                      bluetoothService: _bluetoothService,
+                    ),
+                  ),
+                );
+              },
+              tooltip: '电机检测',
+            ),
           // 控制模式切换开关 (仅连接时显示)
           if (_connectedDevice != null)
             IconButton(

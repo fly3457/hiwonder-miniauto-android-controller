@@ -314,37 +314,46 @@ class BluetoothService {
   }
 
   /// 左转 (左移)
+  /// 注意：原本 state=4 是左移，但根据实际测试，左右方向相反
+  /// 因此这里使用 state=0 来实现左移
   void turnLeft() {
-    _sendAppCommand(4); // APP协议: state=4 表示左移
+    _sendAppCommand(0); // 修正后: state=0 实现左移
     // _sendGloveCommand(-100, 100); // 手套协议版本
   }
 
   /// 右转 (右移)
+  /// 注意：原本 state=0 是右移，但根据实际测试，左右方向相反
+  /// 因此这里使用 state=4 来实现右移
   void turnRight() {
-    _sendAppCommand(0); // APP协议: state=0 表示右移
+    _sendAppCommand(4); // 修正后: state=4 实现右移
     // _sendGloveCommand(100, -100); // 手套协议版本
   }
 
   // ==================== 高级控制: 8方向移动 ====================
+  // 注意：由于实际测试发现左右方向相反，以下指令已做相应调整
 
   /// 右前移动 (45°)
+  /// 注意：原本 state=1 是右前，但左右相反后，这里使用 state=3
   void moveRightForward() {
-    _sendAppCommand(1); // APP协议: state=1 表示右前
+    _sendAppCommand(3); // 修正后: state=3 实现右前移动
   }
 
   /// 左前移动 (315°)
+  /// 注意：原本 state=3 是左前，但左右相反后，这里使用 state=1
   void moveLeftForward() {
-    _sendAppCommand(3); // APP协议: state=3 表示左前
+    _sendAppCommand(1); // 修正后: state=1 实现左前移动
   }
 
   /// 左后移动 (225°)
+  /// 注意：原本 state=5 是左后，但左右相反后，这里使用 state=7
   void moveLeftBackward() {
-    _sendAppCommand(5); // APP协议: state=5 表示左后
+    _sendAppCommand(7); // 修正后: state=7 实现左后移动
   }
 
   /// 右后移动 (135°)
+  /// 注意：原本 state=7 是右后，但左右相反后，这里使用 state=5
   void moveRightBackward() {
-    _sendAppCommand(7); // APP协议: state=7 表示右后
+    _sendAppCommand(5); // 修正后: state=5 实现右后移动
   }
 
   // ==================== 高级控制: 旋转 ====================
@@ -362,6 +371,31 @@ class BluetoothService {
   /// 停止旋转
   void stopRotate() {
     _sendAppCommand(11); // APP协议: state=11 表示停止旋转
+  }
+
+  // ==================== 电机测试 ====================
+
+  /// 测试单个电机
+  /// [motorId] 电机编号 (0-3)
+  /// [speed] 速度 (-100到100, 正值正转, 负值反转)
+  /// 格式: G|motorId|speed|$
+  Future<void> testMotor(int motorId, int speed) async {
+    if (!_isConnected || _txCharacteristic == null) {
+      print('[BLE] 未连接到设备');
+      return;
+    }
+
+    try {
+      motorId = motorId.clamp(0, 3);
+      speed = speed.clamp(-100, 100);
+      String command = 'G|$motorId|$speed|\$';
+      List<int> data = command.codeUnits;
+
+      await _txCharacteristic!.write(data, withoutResponse: true);
+      print('[BLE] 测试电机: 电机$motorId, 速度$speed');
+    } catch (e) {
+      print('[BLE] 测试电机失败: $e');
+    }
   }
 
   /// 释放资源
