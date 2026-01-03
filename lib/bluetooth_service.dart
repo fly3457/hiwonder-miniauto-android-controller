@@ -195,7 +195,11 @@ class BluetoothService {
 
   /// 发送运动控制指令 (出厂程序字符串协议)
   /// 格式: A|state|$
-  /// state: 0-右移 1-右前 2-前进 3-左前 4-左移 5-左后 6-后退 7-右后 8-停止
+  /// 标准协议定义（符合Arduino端 app_control_common.ino）：
+  /// state=0: 右移(90°)   state=1: 右前(45°)    state=2: 前进(0°)
+  /// state=3: 左前(315°)  state=4: 左移(270°)   state=5: 左后(225°)
+  /// state=6: 后退(180°)  state=7: 右后(135°)   state=8: 停止
+  /// state=9: 顺时针旋转  state=10: 逆时针旋转  state=11: 停止旋转
   Future<void> _sendAppCommand(int state) async {
     if (!_isConnected || _txCharacteristic == null) {
       print('[BLE] 未连接到设备');
@@ -313,47 +317,36 @@ class BluetoothService {
     // _sendGloveCommand(-100, -100); // 手套协议版本
   }
 
-  /// 左转 (左移)
-  /// 注意：原本 state=4 是左移，但根据实际测试，左右方向相反
-  /// 因此这里使用 state=0 来实现左移
+  /// 左移 (标准协议: state=4, 270°)
   void turnLeft() {
-    _sendAppCommand(0); // 修正后: state=0 实现左移
-    // _sendGloveCommand(-100, 100); // 手套协议版本
+    _sendAppCommand(4); // 协议定义: state=4 表示左移 (270°)
   }
 
-  /// 右转 (右移)
-  /// 注意：原本 state=0 是右移，但根据实际测试，左右方向相反
-  /// 因此这里使用 state=4 来实现右移
+  /// 右移 (标准协议: state=0, 90°)
   void turnRight() {
-    _sendAppCommand(4); // 修正后: state=4 实现右移
-    // _sendGloveCommand(100, -100); // 手套协议版本
+    _sendAppCommand(0); // 协议定义: state=0 表示右移 (90°)
   }
 
   // ==================== 高级控制: 8方向移动 ====================
-  // 注意：由于实际测试发现左右方向相反，以下指令已做相应调整
 
-  /// 右前移动 (45°)
-  /// 注意：原本 state=1 是右前，但左右相反后，这里使用 state=3
+  /// 右前移动 (45°, 标准协议: state=1)
   void moveRightForward() {
-    _sendAppCommand(3); // 修正后: state=3 实现右前移动
+    _sendAppCommand(1); // 协议定义: state=1 表示右前 (45°)
   }
 
-  /// 左前移动 (315°)
-  /// 注意：原本 state=3 是左前，但左右相反后，这里使用 state=1
+  /// 左前移动 (315°, 标准协议: state=3)
   void moveLeftForward() {
-    _sendAppCommand(1); // 修正后: state=1 实现左前移动
+    _sendAppCommand(3); // 协议定义: state=3 表示左前 (315°)
   }
 
-  /// 左后移动 (225°)
-  /// 注意：原本 state=5 是左后，但左右相反后，这里使用 state=7
+  /// 左后移动 (225°, 标准协议: state=5)
   void moveLeftBackward() {
-    _sendAppCommand(7); // 修正后: state=7 实现左后移动
+    _sendAppCommand(5); // 协议定义: state=5 表示左后 (225°)
   }
 
-  /// 右后移动 (135°)
-  /// 注意：原本 state=7 是右后，但左右相反后，这里使用 state=5
+  /// 右后移动 (135°, 标准协议: state=7)
   void moveRightBackward() {
-    _sendAppCommand(5); // 修正后: state=5 实现右后移动
+    _sendAppCommand(7); // 协议定义: state=7 表示右后 (135°)
   }
 
   // ==================== 高级控制: 旋转 ====================

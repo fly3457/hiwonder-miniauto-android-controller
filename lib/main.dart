@@ -3,7 +3,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'bluetooth_service.dart';
-import 'motor_test_page.dart';
+import 'settings_page.dart';
 import 'package:location/location.dart' as loc;
 
 void main() {
@@ -45,6 +45,9 @@ class _HomePageState extends State<HomePage> {
   double _green = 255.0;
   double _blue = 255.0;
 
+  // HSB色彩模式状态
+  double _hue = 0.0; // 色相 0-360度
+
   // 控制模式: false=简易模式, true=高级模式
   bool _isAdvancedMode = false;
 
@@ -57,6 +60,10 @@ class _HomePageState extends State<HomePage> {
 
   // 前进按钮状态（用于距离保护）
   bool _isForwardPressed = false;
+
+  // 用户活动检测（用于智能电压请求）
+  bool _isUserControlling = false;
+  DateTime? _lastControlTime;
 
   @override
   void initState() {
@@ -301,11 +308,22 @@ class _HomePageState extends State<HomePage> {
     _requestVoltageLoop();
   }
 
-  /// 定期请求电压和距离数据的循环
+  /// 定期请求电压和距离数据的循环（智能暂停）
   Future<void> _requestVoltageLoop() async {
     while (_voltageRequestActive && _bluetoothService.isConnected) {
+      // 智能电压请求：如果用户在1秒内有操作，暂停电压请求以避免BLE冲突
+      if (_isUserControlling &&
+          _lastControlTime != null &&
+          DateTime.now().difference(_lastControlTime!).inMilliseconds < 1000) {
+        // 用户正在操作，暂停电压请求，等待100ms后重新检查
+        await Future.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+
+      // 用户已停止操作超过1秒，恢复电压请求
+      _isUserControlling = false;
       await _bluetoothService.requestVoltageData();
-      await Future.delayed(const Duration(milliseconds: 200)); // 每200ms请求一次，实现更快的距离刷新
+      await Future.delayed(const Duration(milliseconds: 100)); // 优化: 100ms间隔,提升距离显示响应速度(方案1A)
     }
   }
 
@@ -526,11 +544,6 @@ class _HomePageState extends State<HomePage> {
                         tempSpeed = value;
                       });
                     }),
-                    _buildSpeedPreset('全速', 100, (value) {
-                      setDialogState(() {
-                        tempSpeed = value;
-                      });
-                    }),
                   ],
                 ),
               ],
@@ -726,13 +739,64 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// HSB转RGB颜色转换
+  /// h: 色相 0-360度
+  /// s: 饱和度 0.0-1.0
+  /// brightness: 亮度 0.0-1.0
+  /// 返回: [r, g, b] 0-255
+  List<int> hsbToRgb(double h, double s, double brightness) {
+    // 确保h在0-360范围内
+    h = h % 360;
+
+    double c = brightness * s; // 色度
+    double x = c * (1 - ((h / 60) % 2 - 1).abs());
+    double m = brightness - c;
+
+    double r0, g0, b0;
+
+    if (h < 60) {
+      r0 = c; g0 = x; b0 = 0;
+    } else if (h < 120) {
+      r0 = x; g0 = c; b0 = 0;
+    } else if (h < 180) {
+      r0 = 0; g0 = c; b0 = x;
+    } else if (h < 240) {
+      r0 = 0; g0 = x; b0 = c;
+    } else if (h < 300) {
+      r0 = x; g0 = 0; b0 = c;
+    } else {
+      r0 = c; g0 = 0; b0 = x;
+    }
+
+    int r = ((r0 + m) * 255).round();
+    int g = ((g0 + m) * 255).round();
+    int b = ((b0 + m) * 255).round();
+
+    return [r, g, b];
+  }
+
+  /// 通过HSB设置颜色
+  void _setColorByHSB(double hue) {
+    // S设置为100% (1.0), B保持50% (0.5)
+    List<int> rgb = hsbToRgb(hue, 1.0, 0.5);
+
+    setState(() {
+      _hue = hue;
+      _red = rgb[0].toDouble();
+      _green = rgb[1].toDouble();
+      _blue = rgb[2].toDouble();
+    });
+
+    _bluetoothService.setRgbColor(rgb[0], rgb[1], rgb[2]);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MiniAuto 小车控制器'),
+        title: const Text('MiniAuto控制器'),
         actions: [
-          // 设置图标 (仅连接时显示，用于进入电机检测)
+          // 设置图标 (仅连接时显示，点击进入设置页)
           if (_connectedDevice != null)
             IconButton(
               icon: const Icon(Icons.settings),
@@ -740,30 +804,19 @@ class _HomePageState extends State<HomePage> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => MotorTestPage(
+                    builder: (context) => SettingsPage(
                       bluetoothService: _bluetoothService,
+                      isAdvancedMode: _isAdvancedMode,
+                      onModeChanged: (value) {
+                        setState(() {
+                          _isAdvancedMode = value;
+                        });
+                      },
                     ),
                   ),
                 );
               },
-              tooltip: '电机检测',
-            ),
-          // 控制模式切换开关 (仅连接时显示)
-          if (_connectedDevice != null)
-            IconButton(
-              icon: Icon(_isAdvancedMode ? Icons.gamepad : Icons.control_camera),
-              onPressed: () {
-                setState(() {
-                  _isAdvancedMode = !_isAdvancedMode;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(_isAdvancedMode ? '已切换到高级控制模式' : '已切换到简易控制模式'),
-                    duration: const Duration(seconds: 1),
-                  ),
-                );
-              },
-              tooltip: _isAdvancedMode ? '切换到简易控制' : '切换到高级控制',
+              tooltip: '设置',
             ),
           // 速度控制图标 (仅连接时显示)
           if (_connectedDevice != null)
@@ -771,19 +824,6 @@ class _HomePageState extends State<HomePage> {
               icon: const Icon(Icons.speed),
               onPressed: _showSpeedDialog,
               tooltip: '速度控制',
-            ),
-          // 蓝牙连接/断开图标
-          if (_connectedDevice != null)
-            IconButton(
-              icon: const Icon(Icons.bluetooth_connected),
-              onPressed: _showDisconnectDialog, // 显示确认对话框
-              tooltip: '断开连接',
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.bluetooth),
-              onPressed: _scanDevices,
-              tooltip: '扫描设备',
             ),
         ],
       ),
@@ -830,13 +870,22 @@ class _HomePageState extends State<HomePage> {
           children: [
             Row(
               children: [
-                Icon(
-                  _bluetoothService.isConnected
-                      ? Icons.bluetooth_connected
-                      : Icons.bluetooth_disabled,
-                  color: _bluetoothService.isConnected
-                      ? Colors.green
-                      : Colors.grey,
+                // 蓝牙图标按钮 - 已连接时点击断开,未连接时点击扫描
+                IconButton(
+                  icon: Icon(
+                    _bluetoothService.isConnected
+                        ? Icons.bluetooth_connected
+                        : Icons.bluetooth_disabled,
+                    color: _bluetoothService.isConnected
+                        ? Colors.green
+                        : Colors.grey,
+                  ),
+                  onPressed: _bluetoothService.isConnected
+                      ? _showDisconnectDialog
+                      : _scanDevices,
+                  tooltip: _bluetoothService.isConnected ? '断开连接' : '扫描设备',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -896,26 +945,37 @@ class _HomePageState extends State<HomePage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('可用设备:',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('可用设备:',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('${_devices.length}个',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                      ],
+                    ),
                     const SizedBox(height: 8),
-                    // 使用 ConstrainedBox 限制设备列表最大高度,并添加滚动
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 200),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _devices.length,
-                        itemBuilder: (context, index) {
-                          final device = _devices[index];
-                          return ListTile(
-                            leading: const Icon(Icons.bluetooth),
-                            title: Text(device.platformName.isNotEmpty
-                                ? device.platformName
-                                : '未知设备'),
-                            subtitle: Text(device.remoteId.toString()),
-                            onTap: () => _connectToDevice(device),
-                          );
-                        },
+                    // 设备列表占据大部分屏幕高度，添加滚动条
+                    SizedBox(
+                      height: MediaQuery.of(context).size.height * 0.6, // 占据60%的屏幕高度
+                      child: Scrollbar(
+                        thumbVisibility: true, // 始终显示滚动条
+                        thickness: 6.0,
+                        radius: const Radius.circular(3),
+                        child: ListView.builder(
+                          itemCount: _devices.length,
+                          itemBuilder: (context, index) {
+                            final device = _devices[index];
+                            return ListTile(
+                              leading: const Icon(Icons.bluetooth),
+                              title: Text(device.platformName.isNotEmpty
+                                  ? device.platformName
+                                  : '未知设备'),
+                              subtitle: Text(device.remoteId.toString()),
+                              onTap: () => _connectToDevice(device),
+                            );
+                          },
+                        ),
                       ),
                     ),
                   ],
@@ -987,7 +1047,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 构建RGB灯光控制（紧凑版）
+  /// 构建RGB灯光控制（HSB色彩模式）
   Widget _buildRgbControl() {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -996,17 +1056,42 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 标题行
+            // 标题行: 白色圆形按钮 + 黑色圆形按钮 + RGB设置按钮
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text('灯光控制', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                 Row(
                   children: [
-                    // "关"按钮（放在原来预览框的位置）
-                    _buildColorPreset('关', 0, 0, 0, displayR: 0, displayG: 0, displayB: 0),
-                    const SizedBox(width: 8),
-                    // 高级设置按钮
+                    // 白色按钮（圆形）- 纯白光
+                    _buildCircularColorButton(
+                      color: Colors.white,
+                      borderColor: Colors.grey.shade400,
+                      onPressed: () {
+                        setState(() {
+                          _red = 255;
+                          _green = 255;
+                          _blue = 255;
+                        });
+                        _bluetoothService.setRgbColor(255, 255, 255);
+                      },
+                    ),
+                    const SizedBox(width: 10),
+                    // 黑色按钮（圆形，关灯）
+                    _buildCircularColorButton(
+                      color: Colors.black,
+                      borderColor: Colors.grey.shade600,
+                      onPressed: () {
+                        setState(() {
+                          _red = 0;
+                          _green = 0;
+                          _blue = 0;
+                        });
+                        _bluetoothService.setRgbColor(0, 0, 0);
+                      },
+                    ),
+                    const SizedBox(width: 10),
+                    // 高级RGB设置按钮
                     IconButton(
                       icon: const Icon(Icons.tune, size: 20),
                       onPressed: _showRgbDialog,
@@ -1018,22 +1103,89 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 16),
 
-            // 快捷颜色按钮（紧凑排列，不含"关"）
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
+            // HSB色相滑块 - 带彩虹渐变背景
+            Row(
               children: [
-                _buildColorPreset('红', 10, 0, 0, displayR: 200, displayG: 0, displayB: 0),
-                _buildColorPreset('橘', 50, 10, 0, displayR: 200, displayG: 100, displayB: 0),
-                _buildColorPreset('黄', 30, 10, 0, displayR: 200, displayG: 200, displayB: 0),
-                _buildColorPreset('绿', 0, 10, 0, displayR: 0, displayG: 200, displayB: 0),
-                _buildColorPreset('青', 0, 15, 30, displayR: 0, displayG: 100, displayB: 200),
-                _buildColorPreset('蓝', 0, 0, 10, displayR: 0, displayG: 0, displayB: 200),
-                _buildColorPreset('紫', 10, 0, 10, displayR: 200, displayG: 0, displayB: 200),
-                _buildColorPreset('白', 30, 20, 10, displayR: 255, displayG: 255, displayB: 255),
+                const SizedBox(
+                  width: 30,
+                  child: Text('色相', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))
+                ),
+                Expanded(
+                  child: Container(
+                    height: 36,
+                    decoration: BoxDecoration(
+                      // 彩虹渐变背景: S=100%, B=100% 显示纯色
+                      // 红->黄->绿->青->蓝->洋红->红
+                      gradient: const LinearGradient(
+                        colors: [
+                          Color(0xFFFF0000), // 红色 0° (S=100%, B=100%)
+                          Color(0xFFFFFF00), // 黄色 60°
+                          Color(0xFF00FF00), // 绿色 120°
+                          Color(0xFF00FFFF), // 青色 180°
+                          Color(0xFF0000FF), // 蓝色 240°
+                          Color(0xFFFF00FF), // 洋红 300°
+                          Color(0xFFFF0000), // 红色 360° (循环)
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: Colors.grey.shade300, width: 1),
+                    ),
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 0, // 隐藏原生轨道,使用渐变背景
+                        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 12.0),
+                        thumbColor: Colors.white,
+                        overlayShape: const RoundSliderOverlayShape(overlayRadius: 20.0),
+                        activeTrackColor: Colors.transparent,
+                        inactiveTrackColor: Colors.transparent,
+                      ),
+                      child: Slider(
+                        value: _hue,
+                        min: 0,
+                        max: 360,
+                        divisions: 72, // 每5度一个刻度
+                        label: '${_hue.round()}°',
+                        onChanged: (value) {
+                          _setColorByHSB(value);
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 45,
+                  child: Text('${_hue.round()}°', textAlign: TextAlign.right, style: const TextStyle(fontSize: 12))
+                ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建圆形颜色按钮
+  Widget _buildCircularColorButton({
+    required Color color,
+    required Color borderColor,
+    required VoidCallback onPressed,
+  }) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(color: borderColor, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.2),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
             ),
           ],
         ),
@@ -1047,8 +1199,14 @@ class _HomePageState extends State<HomePage> {
     return _isAdvancedMode ? _buildAdvancedControl() : _buildSimpleControl();
   }
 
-  /// 构建简易控制UI (原有的4方向控制)
+  /// 构建简易控制UI (4方向控制)
   Widget _buildSimpleControl() {
+    // 计算按钮尺寸: 屏幕宽度80% / 3个按钮 - 间距
+    double screenWidth = MediaQuery.of(context).size.width;
+    double availableWidth = screenWidth * 0.8;
+    double spacing = 12.0;
+    double buttonSize = (availableWidth - spacing * 2) / 3;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -1060,39 +1218,52 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 前进按钮（宽一些，带距离保护）
-          _buildForwardButton(),
-          const SizedBox(height: 12),
-
-          // 左移、后退、右移 一排
+          // 第一行: 前进按钮居中
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildControlButton(
+              _buildUnifiedControlButton(
+                icon: Icons.arrow_upward,
+                label: '前进',
+                onPressed: () => _bluetoothService.forward(),
+                color: Colors.green,
+                width: buttonSize,
+                height: buttonSize,
+                isForward: true, // 启用距离保护
+              ),
+            ],
+          ),
+          SizedBox(height: spacing),
+
+          // 第二行: 左移、后退、右移
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildUnifiedControlButton(
                 icon: Icons.arrow_back,
                 label: '左移',
                 onPressed: () => _bluetoothService.turnLeft(),
                 color: Colors.orange,
-                width: 90,
-                height: 70,
+                width: buttonSize,
+                height: buttonSize,
               ),
-              const SizedBox(width: 12),
-              _buildControlButton(
+              SizedBox(width: spacing),
+              _buildUnifiedControlButton(
                 icon: Icons.arrow_downward,
                 label: '后退',
                 onPressed: () => _bluetoothService.backward(),
                 color: Colors.blue,
-                width: 90,
-                height: 70,
+                width: buttonSize,
+                height: buttonSize,
               ),
-              const SizedBox(width: 12),
-              _buildControlButton(
+              SizedBox(width: spacing),
+              _buildUnifiedControlButton(
                 icon: Icons.arrow_forward,
                 label: '右移',
                 onPressed: () => _bluetoothService.turnRight(),
                 color: Colors.orange,
-                width: 90,
-                height: 70,
+                width: buttonSize,
+                height: buttonSize,
               ),
             ],
           ),
@@ -1103,8 +1274,37 @@ class _HomePageState extends State<HomePage> {
 
   /// 构建高级控制UI (8方向 + 旋转)
   Widget _buildAdvancedControl() {
+    // 获取屏幕尺寸
+    double screenWidth = MediaQuery.of(context).size.width;
+    double screenHeight = MediaQuery.of(context).size.height;
+
+    // 控制区域最大高度为屏幕的1/3
+    double maxControlHeight = screenHeight / 3;
+
+    // 计算按钮间距
+    double spacing = 12.0;
+    double verticalPadding = 12.0;
+
+    // 按钮宽度: 屏幕宽度80% / 3个按钮 - 间距
+    double availableWidth = screenWidth * 0.8;
+    double buttonWidth = (availableWidth - spacing * 2) / 3;
+
+    // 按钮高度: 根据控制区域最大高度计算
+    // 高级控制模式总共有:
+    // - 3行方向键 (每行高度 buttonHeight)
+    // - 2个间距 (在3行方向键之间)
+    // - 1个间距 (方向键和旋转按钮之间)
+    // - 1行旋转按钮 (高度 buttonHeight * 0.6)
+    // - 上下padding (verticalPadding * 2)
+    // 总高度 = buttonHeight * 3 + spacing * 3 + buttonHeight * 0.6 + verticalPadding * 2
+    //        = buttonHeight * 3.6 + spacing * 3 + verticalPadding * 2
+
+    // 根据最大高度反推按钮高度
+    double availableHeight = maxControlHeight - (spacing * 3 + verticalPadding * 2);
+    double buttonHeight = availableHeight / 3.6;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: verticalPadding),
       decoration: BoxDecoration(
         color: Colors.grey.shade100,
         border: Border(
@@ -1115,21 +1315,18 @@ class _HomePageState extends State<HomePage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           // 8方向控制盘
-          _build8DirectionPad(),
-          const SizedBox(height: 12),
+          _build8DirectionPad(buttonWidth, buttonHeight, spacing),
+          SizedBox(height: spacing),
 
           // 旋转控制按钮
-          _buildRotationButtons(),
+          _buildRotationButtons(buttonWidth, buttonHeight, spacing),
         ],
       ),
     );
   }
 
   /// 构建8方向控制盘
-  Widget _build8DirectionPad() {
-    const double btnSize = 65.0;
-    const double spacing = 8.0;
-
+  Widget _build8DirectionPad(double btnWidth, double btnHeight, double spacing) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1137,83 +1334,91 @@ class _HomePageState extends State<HomePage> {
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildDirectionButton(
+            _buildUnifiedControlButton(
               icon: Icons.north_west,
               label: '左前',
               onPressed: () => _bluetoothService.moveLeftForward(),
               color: Colors.purple,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
-            const SizedBox(width: spacing),
-            _buildDirectionButton(
+            SizedBox(width: spacing),
+            _buildUnifiedControlButton(
               icon: Icons.north,
               label: '前进',
               onPressed: () => _bluetoothService.forward(),
               color: Colors.green,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
               isForward: true, // 标记为前进按钮,启用距离保护
             ),
-            const SizedBox(width: spacing),
-            _buildDirectionButton(
+            SizedBox(width: spacing),
+            _buildUnifiedControlButton(
               icon: Icons.north_east,
               label: '右前',
               onPressed: () => _bluetoothService.moveRightForward(),
               color: Colors.purple,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
           ],
         ),
-        const SizedBox(height: spacing),
+        SizedBox(height: spacing),
 
         // 第二行: 左移、停止(空位)、右移
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildDirectionButton(
+            _buildUnifiedControlButton(
               icon: Icons.west,
               label: '左移',
               onPressed: () => _bluetoothService.turnLeft(),
               color: Colors.orange,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
-            const SizedBox(width: spacing + btnSize), // 中间留空
-            _buildDirectionButton(
+            SizedBox(width: spacing + btnWidth), // 中间留空
+            _buildUnifiedControlButton(
               icon: Icons.east,
               label: '右移',
               onPressed: () => _bluetoothService.turnRight(),
               color: Colors.orange,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
           ],
         ),
-        const SizedBox(height: spacing),
+        SizedBox(height: spacing),
 
         // 第三行: 左后、后退、右后
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            _buildDirectionButton(
+            _buildUnifiedControlButton(
               icon: Icons.south_west,
               label: '左后',
               onPressed: () => _bluetoothService.moveLeftBackward(),
               color: Colors.teal,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
-            const SizedBox(width: spacing),
-            _buildDirectionButton(
+            SizedBox(width: spacing),
+            _buildUnifiedControlButton(
               icon: Icons.south,
               label: '后退',
               onPressed: () => _bluetoothService.backward(),
               color: Colors.blue,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
-            const SizedBox(width: spacing),
-            _buildDirectionButton(
+            SizedBox(width: spacing),
+            _buildUnifiedControlButton(
               icon: Icons.south_east,
               label: '右后',
               onPressed: () => _bluetoothService.moveRightBackward(),
               color: Colors.teal,
-              size: btnSize,
+              width: btnWidth,
+              height: btnHeight,
             ),
           ],
         ),
@@ -1222,7 +1427,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 构建旋转控制按钮
-  Widget _buildRotationButtons() {
+  Widget _buildRotationButtons(double btnWidth, double btnHeight, double spacing) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -1232,39 +1437,50 @@ class _HomePageState extends State<HomePage> {
           onPressed: () => _bluetoothService.rotateCounterClockwise(),
           onReleased: () => _bluetoothService.stopRotate(),
           color: Colors.deepPurple,
+          width: btnWidth,
+          height: btnHeight * 0.6, // 旋转按钮高度为方向键的60%
         ),
-        const SizedBox(width: 16),
+        SizedBox(width: spacing),
         _buildRotateButton(
           icon: Icons.rotate_right,
           label: '顺时针',
           onPressed: () => _bluetoothService.rotateClockwise(),
           onReleased: () => _bluetoothService.stopRotate(),
           color: Colors.deepPurple,
+          width: btnWidth,
+          height: btnHeight * 0.6, // 旋转按钮高度为方向键的60%
         ),
       ],
     );
   }
 
-  /// 构建方向按钮 (用于8方向控制盘)
-  Widget _buildDirectionButton({
+  /// 构建统一控制按钮 (支持距离保护)
+  Widget _buildUnifiedControlButton({
     required IconData icon,
     required String label,
     required VoidCallback onPressed,
     required Color color,
-    required double size,
+    required double width,
+    required double height,
     bool isForward = false, // 是否是前进按钮(需要距离保护)
   }) {
     // 如果是前进按钮,检查距离保护
     bool canMove = true;
+    Color buttonColor = color;
+
     if (isForward) {
       canMove = _distance == 0 || _distance >= 100;
       if (!canMove) {
-        color = Colors.grey.shade400;
+        buttonColor = Colors.grey.shade400;
       }
     }
 
     return GestureDetector(
       onTapDown: canMove ? (_) {
+        // 标记用户正在操作（智能电压请求）
+        _isUserControlling = true;
+        _lastControlTime = DateTime.now();
+
         if (isForward) {
           setState(() {
             _isForwardPressed = true;
@@ -1289,14 +1505,14 @@ class _HomePageState extends State<HomePage> {
         _bluetoothService.stop();
       },
       child: Container(
-        width: size,
-        height: size,
+        width: width,
+        height: height,
         decoration: BoxDecoration(
-          color: color,
+          color: buttonColor,
           borderRadius: BorderRadius.circular(10),
           boxShadow: canMove ? [
             BoxShadow(
-              color: color.withOpacity(0.3),
+              color: buttonColor.withOpacity(0.3),
               blurRadius: 6,
               offset: const Offset(0, 3),
             ),
@@ -1308,7 +1524,7 @@ class _HomePageState extends State<HomePage> {
             Icon(
               icon,
               color: canMove ? Colors.white : Colors.grey.shade600,
-              size: size * 0.35,
+              size: height * 0.35,
             ),
             const SizedBox(height: 2),
             Text(
@@ -1332,14 +1548,21 @@ class _HomePageState extends State<HomePage> {
     required VoidCallback onPressed,
     required VoidCallback onReleased,
     required Color color,
+    required double width,
+    required double height,
   }) {
     return GestureDetector(
-      onTapDown: (_) => onPressed(),
+      onTapDown: (_) {
+        // 标记用户正在操作（智能电压请求）
+        _isUserControlling = true;
+        _lastControlTime = DateTime.now();
+        onPressed();
+      },
       onTapUp: (_) => onReleased(),
       onTapCancel: () => onReleased(),
       child: Container(
-        width: 100,
-        height: 60,
+        width: width,
+        height: height,
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(10),
@@ -1354,157 +1577,13 @@ class _HomePageState extends State<HomePage> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: 24),
-            const SizedBox(width: 4),
+            Icon(icon, color: Colors.white, size: height * 0.4),
+            SizedBox(width: width * 0.04),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 构建前进按钮（带距离保护）
-  Widget _buildForwardButton() {
-    // 判断是否可以前进（距离大于等于10cm 或 距离未知）
-    bool canMoveForward = _distance == 0 || _distance >= 100;
-
-    return GestureDetector(
-      onTapDown: canMoveForward ? (_) {
-        setState(() {
-          _isForwardPressed = true;
-        });
-        _bluetoothService.forward();
-      } : null,
-      onTapUp: (_) {
-        setState(() {
-          _isForwardPressed = false;
-        });
-        _bluetoothService.stop();
-      },
-      onTapCancel: () {
-        setState(() {
-          _isForwardPressed = false;
-        });
-        _bluetoothService.stop();
-      },
-      child: Container(
-        width: 200,
-        height: 70,
-        decoration: BoxDecoration(
-          color: canMoveForward ? Colors.green : Colors.grey.shade400,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: canMoveForward ? [
-            BoxShadow(
-              color: Colors.green.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ] : [],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.arrow_upward,
-              color: canMoveForward ? Colors.white : Colors.grey.shade600,
-              size: 70 * 0.35,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              canMoveForward ? '前进' : '距离过近',
               style: TextStyle(
-                color: canMoveForward ? Colors.white : Colors.grey.shade600,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 构建颜色预设按钮（紧凑版）
-  /// r, g, b: 实际发送给硬件的值
-  /// displayR, displayG, displayB: 用于按钮显示的颜色值
-  Widget _buildColorPreset(
-    String label,
-    int r,
-    int g,
-    int b, {
-    int? displayR,
-    int? displayG,
-    int? displayB,
-  }) {
-    // 如果没有指定显示颜色，使用实际发送值
-    final int btnR = displayR ?? r;
-    final int btnG = displayG ?? g;
-    final int btnB = displayB ?? b;
-
-    return ElevatedButton(
-      onPressed: () {
-        setState(() {
-          _red = r.toDouble();
-          _green = g.toDouble();
-          _blue = b.toDouble();
-        });
-        _bluetoothService.setRgbColor(r, g, b);
-      },
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Color.fromRGBO(btnR, btnG, btnB, 1),
-        foregroundColor: (btnR + btnG + btnB) < 400 ? Colors.white : Colors.black,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        minimumSize: const Size(0, 0),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      child: Text(label, style: const TextStyle(fontSize: 11)),
-    );
-  }
-
-  /// 构建控制按钮（支持自定义宽高）
-  Widget _buildControlButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onPressed,
-    required Color color,
-    double width = 80,
-    double height = 80,
-  }) {
-    return GestureDetector(
-      onTapDown: (_) => onPressed(),
-      onTapUp: (_) => _bluetoothService.stop(),
-      onTapCancel: () => _bluetoothService.stop(),
-      child: Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: Colors.white, size: height * 0.35),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: const TextStyle(
                 color: Colors.white,
-                fontSize: 12,
+                fontSize: height * 0.2,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -1513,4 +1592,5 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
 }
