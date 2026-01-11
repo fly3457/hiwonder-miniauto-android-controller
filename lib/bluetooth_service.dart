@@ -15,6 +15,9 @@ class BluetoothService {
   // 数据接收回调
   Function(int voltage, int distance)? onDataReceived;
 
+  // 指令去重缓存 (避免连续发送相同指令)
+  String? _lastCommand;
+
   // DXBT24-5.0的服务和特征UUID
   // 这些是常见的BLE串口服务UUID,如果不匹配需要通过扫描获取实际UUID
   static const String SERVICE_UUID = "0000FFE0-0000-1000-8000-00805F9B34FB";
@@ -174,23 +177,46 @@ class BluetoothService {
     }
   }
 
-  /// 请求超声波距离和电压数据
-  /// 发送命令: D|$
-  Future<void> requestVoltageData() async {
+  /// 发送BLE指令(带指令去重和优先级)
+  /// [command] 指令字符串
+  /// [isPriority] 是否是高优先级指令(A|8|$ 和 D|$ 始终发送)
+  Future<void> _sendCommand(String command, {bool isPriority = false}) async {
     if (!_isConnected || _txCharacteristic == null) {
       print('[BLE] 未连接到设备');
       return;
     }
 
     try {
-      String command = 'D|\$';
-      List<int> data = command.codeUnits;
+      // 高优先级指令(停止和请求数据)始终发送
+      // 普通指令:如果和上一条相同,跳过发送以优化通信
+      if (!isPriority && command == _lastCommand) {
+        print('[BLE] 跳过重复指令: $command');
+        return;
+      }
 
+      List<int> data = command.codeUnits;
       await _txCharacteristic!.write(data, withoutResponse: true);
-      print('[BLE] 请求电压数据: $command');
+      print('[BLE] 发送指令: $command (优先级: ${isPriority ? "高" : "普通"})');
+
+      // 更新缓存
+      // 停止指令(A|8|$)清空缓存,确保下次点击不会被误判为重复
+      // 其他指令更新缓存
+      if (command == 'A|8|\$') {
+        _lastCommand = null; // 停止指令清空缓存
+      } else if (!isPriority) {
+        _lastCommand = command; // 普通指令更新缓存
+      }
+      // D|$ 等高优先级指令不更新缓存
     } catch (e) {
-      print('[BLE] 请求电压数据失败: $e');
+      print('[BLE] 发送指令失败: $e');
     }
+  }
+
+  /// 请求超声波距离和电压数据
+  /// 发送命令: D|$
+  Future<void> requestVoltageData() async {
+    String command = 'D|\$';
+    await _sendCommand(command, isPriority: true); // 高优先级
   }
 
   /// 发送运动控制指令 (出厂程序字符串协议)
@@ -201,41 +227,19 @@ class BluetoothService {
   /// state=6: 后退(180°)  state=7: 右后(135°)   state=8: 停止
   /// state=9: 顺时针旋转  state=10: 逆时针旋转  state=11: 停止旋转
   Future<void> _sendAppCommand(int state) async {
-    if (!_isConnected || _txCharacteristic == null) {
-      print('[BLE] 未连接到设备');
-      return;
-    }
-
-    try {
-      // 构建字符串命令: A|state|$
-      String command = 'A|$state|\$';
-      List<int> data = command.codeUnits; // 转换为ASCII字节数组
-
-      await _txCharacteristic!.write(data, withoutResponse: true);
-      print('[BLE] 发送运动指令: $command');
-    } catch (e) {
-      print('[BLE] 发送指令失败: $e');
-    }
+    // 构建字符串命令: A|state|$
+    String command = 'A|$state|\$';
+    // A|8|$ 停止指令是高优先级
+    bool isPriority = (state == 8);
+    await _sendCommand(command, isPriority: isPriority);
   }
 
   /// 设置速度 (0-100)
   /// 格式: C|speed|$
   Future<void> setSpeed(int speed) async {
-    if (!_isConnected || _txCharacteristic == null) {
-      print('[BLE] 未连接到设备');
-      return;
-    }
-
-    try {
-      speed = speed.clamp(0, 100);
-      String command = 'C|$speed|\$';
-      List<int> data = command.codeUnits;
-
-      await _txCharacteristic!.write(data, withoutResponse: true);
-      print('[BLE] 设置速度: $speed');
-    } catch (e) {
-      print('[BLE] 设置速度失败: $e');
-    }
+    speed = speed.clamp(0, 100);
+    String command = 'C|$speed|\$';
+    await _sendCommand(command); // 普通优先级,可去重
   }
 
   /// 设置RGB灯颜色
@@ -244,23 +248,11 @@ class BluetoothService {
   /// [g] 绿色 (0-255)
   /// [b] 蓝色 (0-255)
   Future<void> setRgbColor(int r, int g, int b) async {
-    if (!_isConnected || _txCharacteristic == null) {
-      print('[BLE] 未连接到设备');
-      return;
-    }
-
-    try {
-      r = r.clamp(0, 255);
-      g = g.clamp(0, 255);
-      b = b.clamp(0, 255);
-      String command = 'B|$r|$g|$b|\$';
-      List<int> data = command.codeUnits;
-
-      await _txCharacteristic!.write(data, withoutResponse: true);
-      print('[BLE] 设置RGB颜色: R=$r, G=$g, B=$b');
-    } catch (e) {
-      print('[BLE] 设置RGB颜色失败: $e');
-    }
+    r = r.clamp(0, 255);
+    g = g.clamp(0, 255);
+    b = b.clamp(0, 255);
+    String command = 'B|$r|$g|$b|\$';
+    await _sendCommand(command); // 普通优先级,可去重
   }
 
   /// 发送手套控制指令 (二进制协议)
@@ -300,8 +292,16 @@ class BluetoothService {
   }
 
   /// 停止小车
-  void stop() {
-    _sendAppCommand(8); // APP协议: state=8 表示停止
+  /// ⭐ 方案5: 重复发送3次停止指令,确保ESP32队列中有足够的停止指令
+  Future<void> stop() async {
+    // 连续发送3次停止指令,间隔10ms
+    for (int i = 0; i < 3; i++) {
+      await _sendAppCommand(8); // APP协议: state=8 表示停止
+      if (i < 2) { // 最后一次不需要延迟
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+    }
+    print('[BLE] 已发送3次停止指令 (A|8|\$)');
     // _sendGloveCommand(0, 0); // 手套协议版本
   }
 
@@ -362,8 +362,16 @@ class BluetoothService {
   }
 
   /// 停止旋转
-  void stopRotate() {
-    _sendAppCommand(11); // APP协议: state=11 表示停止旋转
+  /// ⭐ 方案B: 统一使用A|8|$停止所有运动(移动+旋转)
+  Future<void> stopRotate() async {
+    // 连续发送3次停止指令,间隔10ms
+    for (int i = 0; i < 3; i++) {
+      await _sendAppCommand(8); // 统一使用state=8停止所有运动
+      if (i < 2) { // 最后一次不需要延迟
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+    }
+    print('[BLE] 已发送3次停止指令 (A|8|\$) - 停止旋转');
   }
 
   // ==================== 电机测试 ====================
@@ -373,22 +381,10 @@ class BluetoothService {
   /// [speed] 速度 (-100到100, 正值正转, 负值反转)
   /// 格式: G|motorId|speed|$
   Future<void> testMotor(int motorId, int speed) async {
-    if (!_isConnected || _txCharacteristic == null) {
-      print('[BLE] 未连接到设备');
-      return;
-    }
-
-    try {
-      motorId = motorId.clamp(0, 3);
-      speed = speed.clamp(-100, 100);
-      String command = 'G|$motorId|$speed|\$';
-      List<int> data = command.codeUnits;
-
-      await _txCharacteristic!.write(data, withoutResponse: true);
-      print('[BLE] 测试电机: 电机$motorId, 速度$speed');
-    } catch (e) {
-      print('[BLE] 测试电机失败: $e');
-    }
+    motorId = motorId.clamp(0, 3);
+    speed = speed.clamp(-100, 100);
+    String command = 'G|$motorId|$speed|\$';
+    await _sendCommand(command); // 普通优先级,可去重
   }
 
   /// 释放资源

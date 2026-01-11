@@ -61,10 +61,6 @@ class _HomePageState extends State<HomePage> {
   // 前进按钮状态（用于距离保护）
   bool _isForwardPressed = false;
 
-  // 用户活动检测（用于智能电压请求）
-  bool _isUserControlling = false;
-  DateTime? _lastControlTime;
-
   @override
   void initState() {
     super.initState();
@@ -303,28 +299,27 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// 启动定期请求电压数据
+  /// ⚠ P2优化: 已禁用定时发送D命令
+  /// 原因: Arduino端已改为主动上报传感器数据(每200ms)
+  /// ESP32收到后立即BLE notify给Android,无需主动请求
+  /// 保留此方法仅供调试或手动触发使用
   void _startVoltageRequest() {
-    _voltageRequestActive = true;
-    _requestVoltageLoop();
+    // ⚠ P2优化: 已禁用自动循环,改为被动接收
+    // _voltageRequestActive = true;
+    // _requestVoltageLoop();
   }
 
-  /// 定期请求电压和距离数据的循环（智能暂停）
+  /// 定期请求电压和距离数据的循环
+  /// ⚠ P2优化: 已禁用,改为被动接收Arduino主动上报的传感器数据
+  /// 保留此方法仅供调试或手动触发使用
+  /// 旧方案: Android每200ms发送D命令请求数据 (占用队列和BLE带宽)
+  /// 新方案: Arduino主动推送传感器数据 → ESP32收到后立即BLE notify → Android被动接收
   Future<void> _requestVoltageLoop() async {
-    while (_voltageRequestActive && _bluetoothService.isConnected) {
-      // 智能电压请求：如果用户在1秒内有操作，暂停电压请求以避免BLE冲突
-      if (_isUserControlling &&
-          _lastControlTime != null &&
-          DateTime.now().difference(_lastControlTime!).inMilliseconds < 1000) {
-        // 用户正在操作，暂停电压请求，等待100ms后重新检查
-        await Future.delayed(const Duration(milliseconds: 100));
-        continue;
-      }
-
-      // 用户已停止操作超过1秒，恢复电压请求
-      _isUserControlling = false;
-      await _bluetoothService.requestVoltageData();
-      await Future.delayed(const Duration(milliseconds: 100)); // 优化: 100ms间隔,提升距离显示响应速度(方案1A)
-    }
+    // ⚠ P2优化: 循环已禁用,数据由Arduino主动推送
+    // while (_voltageRequestActive && _bluetoothService.isConnected) {
+    //   await _bluetoothService.requestVoltageData();
+    //   await Future.delayed(const Duration(milliseconds: 200));
+    // }
   }
 
   /// 保存上次连接的设备ID
@@ -1477,10 +1472,6 @@ class _HomePageState extends State<HomePage> {
 
     return GestureDetector(
       onTapDown: canMove ? (_) {
-        // 标记用户正在操作（智能电压请求）
-        _isUserControlling = true;
-        _lastControlTime = DateTime.now();
-
         if (isForward) {
           setState(() {
             _isForwardPressed = true;
@@ -1553,9 +1544,6 @@ class _HomePageState extends State<HomePage> {
   }) {
     return GestureDetector(
       onTapDown: (_) {
-        // 标记用户正在操作（智能电压请求）
-        _isUserControlling = true;
-        _lastControlTime = DateTime.now();
         onPressed();
       },
       onTapUp: (_) => onReleased(),
