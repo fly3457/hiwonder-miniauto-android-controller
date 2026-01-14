@@ -1,94 +1,228 @@
-# MiniAuto 小车控制器
+# MiniAuto 麦克纳姆轮小车控制器
 
-Flutter开发的Android蓝牙控制应用,用于控制miniAuto麦克纳姆轮小车。
+<div align="center">
 
-## 功能特性
+**基于 Flutter 开发的 Android BLE 蓝牙控制应用**
 
-- 🔵 蓝牙设备扫描和连接
-- 🎮 按钮控制(前进/后退/左转/右转/停止)
-- 📡 实时连接状态显示
-- 🔒 自动权限请求
+[![Flutter](https://img.shields.io/badge/Flutter-3.0+-02569B?logo=flutter)](https://flutter.dev)
+[![Dart](https://img.shields.io/badge/Dart-3.0+-0175C2?logo=dart)](https://dart.dev)
+
+</div>
+
+---
+
+## 项目说明
+
+这是配合 **Hiwonder 幻尔科技** 购买的 **miniAuto 麦克纳姆轮小车** 使用的手机控制端应用。
+
+**注意**: 本项目是自学的临时产物,尚不成熟,仅供参考学习。
+
+### 硬件架构
+
+由于小车自带的蓝牙模块损坏,采用以下改造方案:
+
+```
+手机 APP (Flutter)
+    ↓ BLE 蓝牙 (FFE0/FFE1)
+ESP32S3-Cam 模块 (BLE转发固件)
+    ↓ I2C 接口
+Arduino Uno 模块 (麦轮驱动固件)
+    ↓ PWM + 方向控制
+麦克纳姆轮小车 (4个电机)
+```
+
+**需要配合固件**:
+- ESP32S3 转发固件: [esp32s3_ble_test](https://github.com/fly3457/hiwonder-miniauto-arduino-agent/tree/main/esp32s3_ble_test)
+- Arduino Uno 驱动固件: [app_control_common_a](https://github.com/fly3457/hiwonder-miniauto-arduino-agent/tree/main/app_control_common_a)
+
+**完整仓库**: https://github.com/fly3457/hiwonder-miniauto-arduino-agent
+
+---
 
 ## 通信协议
 
-发送到小车的数据格式:
+### BLE 连接参数
+
+| 参数 | 值 |
+|------|-----|
+| 蓝牙模块 | ESP32S3-Cam (兼容 HM-10) |
+| 服务 UUID | `0000FFE0-0000-1000-8000-00805F9B34FB` |
+| 特征 UUID | `0000FFE1-0000-1000-8000-00805F9B34FB` |
+| 通信方式 | 收发共用 (需启用 notify) |
+
+### 指令格式
+
+**协议格式**: `X|data1|data2|...|$`
+
+#### 运动控制 (A 命令)
+
 ```
-0x55 0x55 0x04 0x32 motor1 motor2
+格式: A|state|$
 ```
 
-- 帧头: `0x55 0x55`
-- 长度: `0x04`
-- 功能号: `0x32`
-- motor1/motor2: `-100` 到 `100`
+| state | 功能 | state | 功能 |
+|-------|------|-------|------|
+| 0 | 右移 (90°) | 1 | 右前 (45°) |
+| 2 | 前进 (0°) | 3 | 左前 (315°) |
+| 4 | 左移 (270°) | 5 | 左后 (225°) |
+| 6 | 后退 (180°) | 7 | 右后 (135°) |
+| 8 | 停止 | 9 | 顺时针旋转 |
+| 10 | 逆时针旋转 | - | - |
 
-## 控制指令
+**示例**: `A|2|$` (前进), `A|8|$` (停止)
 
-| 动作 | motor1 | motor2 |
-|------|--------|--------|
-| 前进 | 100 | 100 |
-| 后退 | -100 | -100 |
-| 左转 | -100 | 100 |
-| 右转 | 100 | -100 |
-| 停止 | 0 | 0 |
+#### RGB 灯光 (B 命令)
 
-## 使用方法
+```
+格式: B|r|g|b|$
+参数: r/g/b 范围 0-255
+```
 
-1. 确保小车蓝牙模块已配对
-2. 打开应用,点击扫描按钮
-3. 选择小车设备进行连接
-4. 使用按钮控制小车运动
-5. 按下按钮时小车运动,松开自动停止
+**示例**: `B|255|0|0|$` (红色), `B|0|0|0|$` (关灯)
 
-## 开发环境
+#### 速度控制 (C 命令)
 
-- Flutter SDK 3.0+
-- Android SDK 21+
-- Dart 3.0+
+```
+格式: C|speed|$
+参数: speed 范围 20-100
+```
 
-## 依赖库
+**示例**: `C|50|$` (中速), `C|100|$` (全速)
 
-- `flutter_bluetooth_serial`: 蓝牙通信
-- `permission_handler`: 权限管理
+#### 数据请求 (D 命令)
 
-## 编译运行
+```
+格式: D|$
+返回: $distance,voltage$
+```
+
+distance: 超声波距离 (mm), voltage: 电池电压 (mV)
+
+**示例返回**: `$150,8200$` (距离150mm, 电压8.2V)
+
+#### 电机测试 (G 命令)
+
+```
+格式: G|motorId|speed|$
+参数: motorId (0-3), speed (-100到100)
+```
+
+电机编号: 0=左前, 1=右前, 2=左后, 3=右后
+
+**示例**: `G|0|50|$` (左前轮正转,速度50)
+
+---
+
+## 功能特性
+
+- **双模式控制**: 简易模式 (4方向) / 高级模式 (8方向+旋转)
+- **HSB 色相滑块**: 彩虹渐变背景,直观选择颜色 (0-360°)
+- **实时监测**: 电池电量百分比、电压值、超声波距离
+- **距离保护**: 前进时距离 < 10cm 自动停止
+- **电机检测工具**: 逐个测试4个电机正反转,生成检测报告
+- **自动重连**: 启动时自动连接上次设备
+- **指令优化**: 去重机制、优先级队列、停止指令重复发送3次
+
+---
+
+## 快速开始
+
+### 安装依赖
 
 ```bash
-# 进入项目目录
-cd miniauto_controller
-
-# 获取依赖
+cd hiwonder-miniauto-android-controller
 flutter pub get
-
-# 运行应用
-flutter run
-
-# 构建APK
-flutter build apk --release
 ```
+
+### 运行
+
+```bash
+flutter run
+```
+
+### 构建 APK
+
+```bash
+flutter build apk --release
+# 输出: build/app/outputs/flutter-apk/app-release.apk
+```
+
+### 使用步骤
+
+1. 确保小车已开机,ESP32S3 蓝牙正常
+2. 打开应用,授予蓝牙和位置权限
+3. 开启手机位置服务 (GPS) - Android BLE 扫描强制要求
+4. 点击扫描,选择设备连接
+5. 使用底部控制按钮操作小车
+
+---
 
 ## 项目结构
 
 ```
 lib/
-├── main.dart              # 主界面和应用入口
-└── bluetooth_service.dart # 蓝牙通信服务
+├── main.dart                 # 主界面,连接状态、控制按钮
+├── bluetooth_service.dart    # BLE 通信服务
+├── settings_page.dart        # 设置页面
+└── motor_test_page.dart      # 电机检测页面
 ```
 
-## 注意事项
+---
 
-1. Android 12+需要新的蓝牙权限
-2. 首次运行需要授予蓝牙和位置权限
-3. 确保小车已配对后再扫描
-4. 按钮采用按下发送/松开停止的设计
+## 开发环境
 
-## 后续扩展
+- **Flutter SDK**: 3.0+
+- **Dart SDK**: 3.0+
+- **Android SDK**: API 21+ (Android 5.0+)
 
-- [ ] 添加虚拟摇杆控制
-- [ ] 添加速度调节功能
-- [ ] 添加陀螺仪控制模式
-- [ ] 记住上次连接的设备
-- [ ] 添加连接状态监听
+### 依赖库
+
+```yaml
+flutter_blue_plus: ^1.32.0     # BLE 蓝牙通信
+permission_handler: ^11.0.0    # 权限管理
+shared_preferences: ^2.2.2     # 本地存储
+location: ^5.0.0               # 位置服务检测
+```
+
+---
+
+## 更新日志
+
+### v1.0.0 (2026-01-14)
+
+- 协议统一: 停止指令使用 `A|8|$`
+- 可靠性增强: 停止指令重复发送3次
+- 指令去重机制
+- HSB 色相滑块灯光控制
+- 电机检测功能
+- 距离保护功能
+
+### v0.2.0 (2026-01-09)
+
+- 协议变更: 从二进制协议改为字符串协议 `X|data|$`
+
+### v0.1.0 (2026-01-08)
+
+- 首次提交: BLE 连接、基础运动控制、灯光控制
+
+---
+
+## 相关文档
+
+- **Arduino 端固件仓库**: https://github.com/fly3457/hiwonder-miniauto-arduino-agent
+- **CLAUDE.md**: Claude Code 开发指南
+- **BUILD.md**: 编译和测试说明
+
+---
 
 ## 许可证
 
 本项目用于学习和研究目的。
+
+---
+
+<div align="center">
+
+Made with Flutter 🚀
+
+</div>
