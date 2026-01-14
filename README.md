@@ -32,8 +32,8 @@ Arduino Uno 模块 (麦轮驱动固件)
 ```
 
 **需要配合固件**:
-- ESP32S3 转发固件: [esp32s3_ble_test](https://github.com/fly3457/hiwonder-miniauto-arduino-agent/tree/main/esp32s3_ble_test)
-- Arduino Uno 驱动固件: [app_control_common_a](https://github.com/fly3457/hiwonder-miniauto-arduino-agent/tree/main/app_control_common_a)
+- ESP32S3 转发固件: [esp32_command_hub](https://github.com/fly3457/hiwonder-miniauto-arduino-agent/tree/main/esp32_command_hub)
+- Arduino Uno 驱动固件: [arduino_motion_core](https://github.com/fly3457/hiwonder-miniauto-arduino-agent/tree/main/arduino_motion_core)
 
 **完整仓库**: https://github.com/fly3457/hiwonder-miniauto-arduino-agent
 
